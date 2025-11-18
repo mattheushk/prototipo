@@ -1,1 +1,192 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Protótipo - Jogo de Tiro (JS)</title>
+  <style>
+    /* ===== Estilos ===== */
+    :root{--bg:#0b1221;--player:#66ff66;--enemy:#ff6666;--bullet:#fff2b8}
+    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#071027, #0b1221);color:#ddd}
+    .wrap{max-width:900px;margin:18px auto;padding:18px}
+    h1{margin:0 0 10px;font-size:20px}
+    canvas{display:block;background:#031024;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.6);width:100%;height:520px}
+    .info{display:flex;gap:12px;align-items:center;margin-top:10px}
+    .btn{background:#18324a;padding:8px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.06);cursor:pointer;color:#cfe8ff}
+    .small{font-size:14px;color:#aab}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Protótipo: Jogo de Tiro em JavaScript</h1>
+    <p class="small">Use ← → ou A D para mover. Espaço para atirar. Clique "Reiniciar" para começar outra vez.</p>
+    <canvas id="game" width="800" height="520"></canvas>
+    <div class="info">
+      <div id="score">Pontuação: 0</div>
+      <div id="lives">Vidas: 3</div>
+      <button id="restart" class="btn">Reiniciar</button>
+    </div>
+  </div>
+
+  <script>
+    // ===== Protótipo simples de jogo de tiro (canvas + JS) =====
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+
+    // Estado do jogo
+    const state = {
+      left:false, right:false, shoot:false,
+      bullets:[], enemies:[], particles:[], score:0, lives:3, running:false
+    };
+
+    // Jogador
+    const player = {
+      x: W/2, y: H - 50, w: 40, h: 16, speed: 5, cooldown:0
+    };
+
+    // Utilidades
+    function rand(min,max){ return Math.random()*(max-min)+min }
+
+    // Tiro
+    function spawnBullet(){
+      state.bullets.push({x: player.x, y: player.y-10, r:4, vy:-7});
+    }
+
+    // Inimigos simples
+    function spawnEnemy(){
+      const size = Math.floor(rand(18,34));
+      state.enemies.push({x:rand(30,W-30), y:-size, w:size, h:size, vy:rand(0.8,2.2), hp:1});
+    }
+
+    // Colisão AABB
+    function collide(a,b){
+      return a.x - (a.w||a.r||0) < b.x + b.w && a.x + (a.w||a.r||0) > b.x &&
+             a.y - (a.h||a.r||0) < b.y + b.h && a.y + (a.h||a.r||0) > b.y;
+    }
+
+    // Partículas simples para feedback visual
+    function addExplosion(x,y,color){
+      for(let i=0;i<12;i++) state.particles.push({x,y, vx:rand(-2,2), vy:rand(-3,1), life:rand(30,60), c:color});
+    }
+
+    // Atualiza lógica
+    let spawnTimer = 0;
+    function update(){
+      if(!state.running) return;
+
+      // movimento jogador
+      if(state.left) player.x -= player.speed;
+      if(state.right) player.x += player.speed;
+      player.x = Math.max(20, Math.min(W-20, player.x));
+
+      // tiro (cooldown)
+      if(state.shoot && player.cooldown<=0){ spawnBullet(); player.cooldown = 12 }
+      if(player.cooldown>0) player.cooldown--;
+
+      // atualizar balas
+      for(let i=state.bullets.length-1;i>=0;i--){
+        const b = state.bullets[i]; b.y += b.vy;
+        if(b.y < -10) state.bullets.splice(i,1);
+      }
+
+      // spawn inimigos progressivo
+      spawnTimer += 1;
+      if(spawnTimer > Math.max(30, 80 - Math.floor(state.score/6))){ spawnEnemy(); spawnTimer=0 }
+
+      // atualizar inimigos
+      for(let i=state.enemies.length-1;i>=0;i--){
+        const e = state.enemies[i]; e.y += e.vy;
+        if(e.y > H+50){ state.enemies.splice(i,1); state.lives--; if(state.lives<=0) gameOver(); }
+      }
+
+      // checar colisões bala x inimigo
+      for(let i=state.enemies.length-1;i>=0;i--){
+        const e = state.enemies[i];
+        for(let j=state.bullets.length-1;j>=0;j--){
+          const b = state.bullets[j];
+          if(collide({x:b.x,y:b.y,r:b.r},{x:e.x,y:e.y,w:e.w,h:e.h})){
+            // acerto
+            state.bullets.splice(j,1);
+            e.hp--;
+            addExplosion(e.x+e.w/2,e.y+e.h/2,'orange');
+            if(e.hp<=0){ state.enemies.splice(i,1); state.score += 10 }
+            break;
+          }
+        }
+      }
+
+      // atualizar partículas
+      for(let i=state.particles.length-1;i>=0;i--){
+        const p = state.particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.life--;
+        if(p.life<=0) state.particles.splice(i,1);
+      }
+
+      // atualizar HUD
+      document.getElementById('score').textContent = 'Pontuação: ' + state.score;
+      document.getElementById('lives').textContent = 'Vidas: ' + state.lives;
+    }
+
+    // Renderiza tudo
+    function render(){
+      // fundo
+      ctx.clearRect(0,0,W,H);
+      // grade sutil
+      ctx.save();
+      ctx.globalAlpha = 0.06;
+      for(let x=0;x<W;x+=40){ ctx.fillRect(x,0,1,H) }
+      for(let y=0;y<H;y+=40){ ctx.fillRect(0,y,W,1) }
+      ctx.restore();
+
+      // desenha jogador (triângulo)
+      ctx.fillStyle = 'var(--player)';
+      ctx.beginPath(); ctx.moveTo(player.x, player.y-18); ctx.lineTo(player.x-22, player.y+10); ctx.lineTo(player.x+22, player.y+10); ctx.closePath(); ctx.fill();
+
+      // balas
+      ctx.fillStyle = 'var(--bullet)';
+      state.bullets.forEach(b=>{ ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill(); });
+
+      // inimigos
+      ctx.fillStyle = 'var(--enemy)';
+      state.enemies.forEach(e=>{ ctx.fillRect(e.x,e.y,e.w,e.h); });
+
+      // partículas
+      state.particles.forEach(p=>{ ctx.globalAlpha = Math.max(0, p.life/60); ctx.fillStyle = p.c || '#fff'; ctx.fillRect(p.x,p.y,3,3); });
+      ctx.globalAlpha = 1;
+
+      // HUD sobre o canvas
+      ctx.fillStyle = '#cfe8ff88'; ctx.font = '14px Arial'; ctx.fillText('Score: ' + state.score, 10, 20);
+    }
+
+    // Loop principal
+    function loop(){ update(); render(); requestAnimationFrame(loop); }
+
+    // Iniciar e reiniciar
+    function startGame(){
+      state.bullets = []; state.enemies = []; state.particles = []; state.score=0; state.lives=3; state.running=true; spawnTimer=0;
+    }
+    function gameOver(){ state.running = false; alert('Game Over! Sua pontuação: ' + state.score); }
+
+    // Controles
+    window.addEventListener('keydown', e=>{
+      if(e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') state.left = true;
+      if(e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') state.right = true;
+      if(e.key === ' '){ state.shoot = true; e.preventDefault(); }
+      // reiniciar com R
+      if(e.key.toLowerCase() === 'r') startGame();
+    });
+    window.addEventListener('keyup', e=>{
+      if(e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') state.left = false;
+      if(e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') state.right = false;
+      if(e.key === ' ') state.shoot = false;
+    });
+
+    document.getElementById('restart').addEventListener('click', startGame);
+
+    // Start loop
+    startGame();
+    loop();
+  </script>
+</body>
+</html>
 
